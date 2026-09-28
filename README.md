@@ -40,8 +40,15 @@ Si `state.json` no existe, se registran todos los ids actuales y se publica
 
 ### Errores
 
-Si la página falla o devuelve 0 artículos, el estado no se toca y el job
-termina con error, así que GitHub te avisa por mail. Si falla una publicación
+En ningún caso de error se toca el estado. El resultado depende del tipo de falla:
+
+- **Falla pasajera** (error de red, timeout, HTTP 5xx o 429): la ejecución
+  termina OK con un aviso (`warning`) y la siguiente vuelve a intentar. No
+  llega mail.
+- **Falla grave** (HTTP 403 o 404, la estructura de la página cambió o
+  devolvió 0 artículos): el job termina con error y GitHub te avisa por mail.
+
+Si falla una publicación
 en Discord, se guarda el resto y esa noticia se reintenta en la próxima ejecución.
 
 ## Configuración

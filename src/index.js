@@ -64,12 +64,25 @@ const truncate = (s, max) => {
   return clean.length <= max ? clean : `${clean.slice(0, max - 1).trimEnd()}…`;
 };
 
+// Falla pasajera (red, timeout, 5xx, 429): no se reintenta acá, lo hace la
+// próxima ejecución programada. El job termina OK para no mandar un mail.
+class TransientError extends Error {}
+
 async function fetchText(url) {
-  const res = await fetch(url, {
-    headers: { 'User-Agent': USER_AGENT, 'Accept-Language': 'es-MX,es;q=0.9' },
-    signal: AbortSignal.timeout(20_000),
-  });
-  if (!res.ok) throw new Error(`HTTP ${res.status} al pedir ${url}`);
+  let res;
+  try {
+    res = await fetch(url, {
+      headers: { 'User-Agent': USER_AGENT, 'Accept-Language': 'es-MX,es;q=0.9' },
+      signal: AbortSignal.timeout(20_000),
+    });
+  } catch (err) {
+    throw new TransientError(`Error de red al pedir ${url}: ${err.cause?.code || err.message}`);
+  }
+  if (!res.ok) {
+    const msg = `HTTP ${res.status} al pedir ${url}`;
+    if (res.status >= 500 || res.status === 429 || res.status === 408) throw new TransientError(msg);
+    throw new Error(msg);
+  }
   return res.text();
 }
 
@@ -246,7 +259,8 @@ async function main() {
   try {
     articles = parseListing(await fetchText(LIST_URL));
   } catch (err) {
-    throw new Error(`No se pudo leer el listado de noticias: ${err.message}`);
+    const msg = `No se pudo leer el listado de noticias: ${err.message}`;
+    throw err instanceof TransientError ? new TransientError(msg) : new Error(msg);
   }
   if (articles.length === 0) {
     throw new Error('El listado de noticias devolvió 0 artículos. No se modifica el estado.');
@@ -321,6 +335,11 @@ async function main() {
 }
 
 main().catch((err) => {
+  if (err instanceof TransientError) {
+    // Anotación visible en GitHub Actions; el estado no se tocó.
+    console.log(`::warning::${err.message}. Se reintenta en la próxima ejecución.`);
+    return;
+  }
   console.error(`\n🚨 ERROR: ${err.message}`);
   process.exit(1);
 });
