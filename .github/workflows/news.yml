@@ -1,0 +1,48 @@
+name: Noticias WoW → Discord
+
+on:
+  schedule:
+    - cron: "*/20 * * * *" # repo público: cada 20 minutos
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+concurrency:
+  group: wow-news
+  cancel-in-progress: false
+
+jobs:
+  publish:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@v5
+
+      - uses: actions/setup-node@v5
+        with:
+          node-version: 24
+
+      - name: Publicar noticias nuevas
+        run: node src/index.js
+        env:
+          DISCORD_WEBHOOK_NEWS: ${{ secrets.DISCORD_WEBHOOK_NEWS }}
+          DISCORD_ROLE_ID: ${{ secrets.DISCORD_ROLE_ID }}
+          DISCORD_AVATAR_URL: ${{ vars.DISCORD_AVATAR_URL }}
+          EXCLUDE_PATCH_NOTES: ${{ vars.EXCLUDE_PATCH_NOTES || 'false' }}
+
+      # Se ejecuta aunque el paso anterior falle, para guardar lo que sí se publicó.
+      - name: Commitear state.json si cambió
+        if: ${{ !cancelled() }}
+        run: |
+          [ -f state.json ] || exit 0
+          git add state.json
+          if git diff --staged --quiet; then
+            echo "state.json sin cambios"
+            exit 0
+          fi
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git commit -m "chore: actualizar state.json"
+          git pull --rebase
+          git push
